@@ -61,6 +61,10 @@ impl Machine {
     self.reg[r as usize] = val;
   }
 
+  fn addr(&mut self, r: u16, val: u16) {
+    self.reg[r as usize] += val;
+  }
+
   fn getm(&self, addr: u16) -> u16 {
     self.mem[addr as usize]
   }
@@ -89,10 +93,10 @@ impl Machine {
         OP::ADD => {
           let dr: u16 = (instr >> 9) & 0x7;
           let sr1: u16 = (instr >> 6) & 0x7;
-          let imm: bool = (instr >> 5) & 0x1 == 1;
 
-          if imm {
-            self.setr(dr, self.getr(sr1) + sign_extend(instr & 0x1F, 5));
+          if (instr >> 5) & 0x1 == 1 {
+            let imm: u16 = sign_extend(instr & 0x1F, 5);
+            self.setr(dr, self.getr(sr1) + imm);
           } else {
             let sr2: u16 = instr & 0x7;
             self.setr(dr, self.getr(sr1) + self.getr(sr2));
@@ -119,7 +123,24 @@ impl Machine {
           let P: bool = self.getr(COND) == POS;
 
           if (n && N) || (z && Z) || (p || P) {
-            self.setr(PC, self.getr(PC) + offset);
+            self.addr(PC, offset);
+          }
+        },
+
+        OP::JMP => {
+          let base: u16 = (instr >> 6) & 0x7;
+          self.setr(PC, base);
+        },
+
+        OP::JSR => {
+          self.setr(0x7, self.getr(PC)); 
+
+          if (instr >> 11) & 0x1 == 1 {
+            let offset: u16 = sign_extend(instr & 0xFFF, 11);
+            self.addr(PC, offset);
+          } else {
+            let base: u16 = (instr >> 6) & 0x7;
+            self.setr(PC, base);
           }
         },
 
