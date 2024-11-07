@@ -3,5 +3,6 @@ name = "lc3"
 
 [dependencies]
 log = "0.4"
+env_logger = "0.11.5"
 num-traits = "0.2"
 num-derive = "0.4"

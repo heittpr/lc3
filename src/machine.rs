@@ -1,4 +1,4 @@
-use log::warn;
+use log::{warn, trace};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
@@ -98,7 +98,11 @@ impl Machine {
   }
 
   pub fn step(&mut self) {
+    trace!("fetching address {:#06x}", self.getr(PC));
     let instr: u16 = self.getm(self.getr(PC));
+    self.addr(PC, 1);
+
+    trace!("read instruction {:#06x}", instr);
 
     if let Some(op) = OP::from_u16(instr >> 12) {
       match op {
