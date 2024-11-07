@@ -1,3 +1,4 @@
+use log::warn;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
@@ -14,14 +15,25 @@ enum OP {
   AND,  // bitwise and
   LDR,  // load register
   STR,  // store register
-  RTI,  // unused
+  RTI,  // return from interrupt (unimplemented)
   NOT,  // bitwise not
   LDI,  // load indirect
   STI,  // store indirect
   JMP,  // jump
-  RES,  // unused
+  RES,  // reserved (unused)
   LEA,  // load effective address
   TRAP, // execute trap
+}
+
+#[derive(FromPrimitive)]
+#[repr(u16)]
+enum TRAP {
+  GETC  = 0x20, // get character from keyboard
+  OUT   = 0x21, // output character
+  PUTS  = 0x22, // output word string
+  IN    = 0x23, // get characte from keyboard and echo it
+  PUTSP = 0x24, // output byte string
+  HALT  = 0x25, // halt the machine
 }
 
 pub const MEM_SIZE: usize = 1<<16;
@@ -34,8 +46,8 @@ pub const ZRO   : u16 = 1 << 1;
 pub const NEG   : u16 = 1 << 2;
 
 pub struct Machine {
-  pub reg: [u16; REG_SIZE],
-  pub mem: [u16; MEM_SIZE],
+  reg: [u16; REG_SIZE],
+  mem: [u16; MEM_SIZE],
   pub halt: bool,
 }
 
@@ -73,7 +85,7 @@ impl Machine {
     self.mem[addr as usize] = val;
   }
 
-  fn update_cond(&mut self, r: u16) {
+  fn set_cond(&mut self, r: u16) {
     let val: u16 = self.getr(r);
 
     if val == 0 {
@@ -102,14 +114,20 @@ impl Machine {
             self.setr(dr, self.getr(sr1) + self.getr(sr2));
           }
 
-          self.update_cond(dr);
+          self.set_cond(dr);
         },
 
-        OP::LDI => {
+        OP::AND => {
           let dr: u16 = (instr >> 9) & 0x7;
-          let offset: u16 = sign_extend(instr & 0x1FF, 9);
+          let sr1: u16 = (instr >> 6) & 0x7;
 
-          self.setr(dr, self.getm(self.getm(self.getr(PC) + offset)));
+          if (instr >> 5) & 0x1 == 1 {
+            let imm: u16 = sign_extend(instr & 0x1F, 5);
+            self.setr(dr, self.getr(sr1) & imm);
+          } else {
+            let sr2: u16 = instr & 0x7;
+            self.setr(dr, self.getr(sr1) & self.getr(sr2));
+          }
         },
 
         OP::BR => {
@@ -136,7 +154,7 @@ impl Machine {
           self.setr(0x7, self.getr(PC)); 
 
           if (instr >> 11) & 0x1 == 1 {
-            let offset: u16 = sign_extend(instr & 0xFFF, 11);
+            let offset: u16 = sign_extend(instr & 0x7FF, 11);
             self.addr(PC, offset);
           } else {
             let base: u16 = (instr >> 6) & 0x7;
@@ -144,10 +162,73 @@ impl Machine {
           }
         },
 
-        _ => panic!("not implemented {:#x}", instr),
+        OP::LD => {
+          let dr: u16 = (instr >> 9) & 0x7;
+          let offset: u16 = sign_extend(instr & 0x1FF, 9);
+          self.setr(dr, self.getm(self.getr(PC) + offset));
+          self.set_cond(dr);
+        },
+        
+        OP::LDI => {
+          let dr: u16 = (instr >> 9) & 0x7;
+          let offset: u16 = sign_extend(instr & 0x1FF, 9);
+          self.setr(dr, self.getm(self.getm(self.getr(PC) + offset)));
+          self.set_cond(dr);
+        },
+
+        OP::LDR => {
+          let dr: u16 = (instr >> 9) & 0x7;
+          let base: u16 = (instr >> 6) & 0x7;
+          let offset: u16 = sign_extend(instr & 0x3F, 6);
+          self.setr(dr, self.getm(base + offset));
+        },
+
+        OP::LEA => {
+          let dr: u16 = (instr >> 9) & 0x7;
+          let offset: u16 = sign_extend(instr & 0x1FF, 9);
+          self.setr(dr, self.getr(PC) + offset);
+          self.set_cond(dr);
+        },
+
+        OP::NOT => {
+          let dr: u16 = (instr >> 9) & 0x7;
+          self.setr(dr, !self.getr(dr));
+          self.set_cond(dr);
+        },
+
+        OP::RES | OP::RTI => {
+          warn!("ignoring instruction {:#x}", op as u16);
+        },
+
+        OP::ST => {
+          let sr: u16 = (instr >> 9) & 0x7;
+          let offset = sign_extend(instr & 0x1FF, 9);
+          self.setm(PC + offset, self.getr(sr));
+        },
+
+        OP::STI => {
+          let sr: u16 = (instr >> 9) & 0x7;
+          let offset = sign_extend(instr & 0x1FF, 9);
+          self.setm(self.getm(PC + offset), self.getr(sr));
+        },
+
+        OP::STR => {
+          let sr: u16 = (instr >> 9) & 0x7;
+          let base: u16 = (instr >> 6) & 0x7;
+          let offset = sign_extend(instr & 0x3F, 6);
+          self.setm(base + offset, self.getr(sr));
+        },
+
+        OP::TRAP => {
+          self.setr(0x7, self.getr(PC));
+
+          if let Some(trap) = TRAP::from_u16(instr & 0xFF) {
+            warn!("unimplemented trap {:#x}", trap as u16);
+          } else {
+            panic!("unknow trap {:#x}", instr & 0xFF);
+          }
+        }
       }
-    } else {
-      panic!("invalid opcode! {:#x}", instr);
     }
   }
 }
